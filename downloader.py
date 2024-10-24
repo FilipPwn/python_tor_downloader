@@ -238,8 +238,8 @@ def main():
     parser.add_argument('--poll_interval', type=float, default=1.0, help='Polling interval in seconds for files.txt')
     parser.add_argument('--base_socks_port', type=int, default=29500, help='Starting port number for Tor SocksPorts')
     parser.add_argument('--base_control_port', type=int, default=39500, help='Starting port number for Tor ControlPorts')
-    parser.add_argument('--tor_start_retries', type=int, default=3, help='Number of retries to start Tor instances')
-    parser.add_argument('--tor_start_timeout', type=int, default=90, help='Timeout in seconds for starting Tor instances')
+    parser.add_argument('--tor_start_retries', type=int, default=2, help='Number of retries to start Tor instances')
+    parser.add_argument('--tor_start_timeout', type=int, default=20, help='Timeout in seconds for starting Tor instances')
     args = parser.parse_args()
 
     # Setup logging
@@ -265,6 +265,17 @@ def main():
                             'SocksPort': str(socks_port),
                             'ControlPort': str(control_port),
                             'DataDirectory': data_directory,
+                            # Add the following configurations to optimize speed
+                            'NumEntryGuards': '8',                # Increase the number of entry guards
+                            'NewCircuitPeriod': '60',             # Increase time before a new circuit is built
+                            'MaxCircuitDirtiness': '600',         # Keep circuits open longer
+                            'CircuitBuildTimeout': '10',          # Timeout slow circuit builds faster
+                            'ExcludeNodes': '',                   # Ensure no nodes are excluded
+                            'ExcludeExitNodes': '',               # Ensure no exit nodes are excluded
+                            'ConnLimit': '1024',                  # Increase the maximum number of connections
+                            'BandwidthRate': '10 MB',             # Increase bandwidth rate limit
+                            'BandwidthBurst': '20 MB',            # Increase bandwidth burst limit
+                            'AvoidDiskWrites': '1',               # Reduce disk I/O
                         },
                         timeout=args.tor_start_timeout,
                         init_msg_handler=print_bootstrap_lines,
