@@ -232,12 +232,14 @@ def main():
     parser.add_argument('--input', type=str, default='files.txt', help='Path to the input files.txt')
     parser.add_argument('--output_dir', type=str, default='downloaded_files', help='Directory to save downloaded files')
     parser.add_argument('--log_file', type=str, default='dynamic_file_downloader.log', help='Log file name')
-    parser.add_argument('--retries', type=int, default=30, help='Number of retries for requests')
+    parser.add_argument('--retries', type=int, default=100, help='Number of retries for requests')
     parser.add_argument('--backoff_factor', type=float, default=1, help='Backoff factor for retries')
     parser.add_argument('--max_workers', type=int, default=10, help='Maximum number of parallel downloads')
     parser.add_argument('--poll_interval', type=float, default=1.0, help='Polling interval in seconds for files.txt')
     parser.add_argument('--base_socks_port', type=int, default=29500, help='Starting port number for Tor SocksPorts')
     parser.add_argument('--base_control_port', type=int, default=39500, help='Starting port number for Tor ControlPorts')
+    parser.add_argument('--tor_start_retries', type=int, default=3, help='Number of retries to start Tor instances')
+    parser.add_argument('--tor_start_timeout', type=int, default=90, help='Timeout in seconds for starting Tor instances')
     args = parser.parse_args()
 
     # Setup logging
@@ -254,15 +256,37 @@ def main():
             data_directory = os.path.join(temp_dir, f'tor_data_{i}')
             os.makedirs(data_directory, exist_ok=True)
             logging.info(f"Starting Tor instance {i} on SocksPort {socks_port} and ControlPort {control_port}")
-            tor_process = launch_tor_with_config(
-                config={
-                    'SocksPort': str(socks_port),
-                    'ControlPort': str(control_port),
-                    'DataDirectory': data_directory,
-                },
-                init_msg_handler=print_bootstrap_lines,
-            )
-            tor_instances.append({'process': tor_process, 'socks_port': socks_port, 'control_port': control_port})
+
+            tor_process = None
+            for attempt in range(args.tor_start_retries):
+                try:
+                    tor_process = launch_tor_with_config(
+                        config={
+                            'SocksPort': str(socks_port),
+                            'ControlPort': str(control_port),
+                            'DataDirectory': data_directory,
+                        },
+                        timeout=args.tor_start_timeout,
+                        init_msg_handler=print_bootstrap_lines,
+                    )
+                    break  # Successfully started Tor instance
+                except Exception as e:
+                    logging.warning(f"Attempt {attempt + 1} to start Tor instance {i} failed: {e}")
+                    time.sleep(5)  # Wait before retrying
+
+            if tor_process:
+                tor_instances.append({'process': tor_process, 'socks_port': socks_port, 'control_port': control_port})
+            else:
+                logging.error(f"Failed to start Tor instance {i} after {args.tor_start_retries} attempts. Skipping this instance.")
+                # Clean up data directory for the failed instance
+                shutil.rmtree(data_directory, ignore_errors=True)
+                continue  # Proceed to the next instance
+
+        if not tor_instances:
+            logging.error("No Tor instances could be started. Exiting.")
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            sys.exit(1)
+
     except Exception as e:
         logging.error(f"Failed to start Tor instances: {e}")
         # Cleanup temp directory
@@ -302,7 +326,7 @@ def main():
 
     # Initialize ThreadPoolExecutor for parallel downloads
     try:
-        with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=len(tor_instances)) as executor:
             futures = {}
             try:
                 while True:
